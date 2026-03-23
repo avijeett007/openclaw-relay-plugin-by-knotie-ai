@@ -1,0 +1,7 @@
+relay-plugin-config.json
+relay-plugin-config.example.json
+.env
+*.log
+node_modules/
+.git/
+.DS_Store

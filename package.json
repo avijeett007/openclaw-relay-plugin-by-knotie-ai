@@ -1,0 +1,45 @@
+{
+  "name": "@knotie/openclaw-relay-plugin",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Knotie Relay Bridge for OpenClaw — multi-tenant relay plugin that lets agencies serve AI agents to business clients via whitelabel chat, voice, and OpenClaw interfaces",
+  "main": "index.js",
+  "openclaw": {
+    "entrypoint": "index.js",
+    "manifest": "openclaw.plugin.json"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "prepublishOnly": "node -e \"import('./index.js')\" --input-type=module"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "knotie",
+    "relay",
+    "bridge",
+    "websocket",
+    "multi-tenant",
+    "whitelabel",
+    "ai-agents",
+    "voice-agents",
+    "chat-agents"
+  ],
+  "author": "Knotie AI <hello@knotie.ai> (https://knotie.ai)",
+  "homepage": "https://knotie.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knotie-ai/openclaw-relay-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/knotie-ai/openclaw-relay-plugin/issues"
+  },
+  "license": "MIT"
+}

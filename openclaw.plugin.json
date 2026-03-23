@@ -1,0 +1,71 @@
+{
+  "id": "@knotie/openclaw-relay-plugin",
+  "name": "Knotie Relay Bridge",
+  "version": "1.0.0",
+  "description": "Multi-tenant relay bridge by Knotie AI — connects your OpenClaw instance to a remote relay server, enabling whitelabel browser and voice clients to reach local AI agents via WebSocket",
+  "author": "Knotie AI <hello@knotie.ai>",
+  "homepage": "https://knotie.ai",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "bridge": {
+        "type": "object",
+        "description": "Relay server connection settings",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Relay server WebSocket URL (e.g. wss://relay.example.com/bot)"
+          },
+          "token": {
+            "type": "string",
+            "description": "Bot token for this tenant (from relay admin API)"
+          },
+          "promptTimeoutMs": {
+            "type": "number",
+            "default": 300000,
+            "description": "Max milliseconds to wait for a gateway prompt response"
+          },
+          "reconnectBaseMs": {
+            "type": "number",
+            "default": 1000,
+            "description": "Initial reconnect delay in milliseconds"
+          },
+          "reconnectMaxMs": {
+            "type": "number",
+            "default": 60000,
+            "description": "Maximum reconnect delay in milliseconds"
+          }
+        },
+        "required": ["url", "token"]
+      },
+      "gateway": {
+        "type": "object",
+        "description": "Local OpenClaw gateway connection settings",
+        "properties": {
+          "url": {
+            "type": "string",
+            "default": "ws://127.0.0.1:18789",
+            "description": "OpenClaw gateway WebSocket URL"
+          },
+          "agentId": {
+            "type": "string",
+            "default": "main",
+            "description": "Agent ID to target in the gateway"
+          }
+        }
+      },
+      "log": {
+        "type": "object",
+        "description": "Logging settings",
+        "properties": {
+          "verbose": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable verbose debug logging"
+          }
+        }
+      }
+    },
+    "required": ["bridge"]
+  }
+}
