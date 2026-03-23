@@ -28,7 +28,7 @@ export default {
   description: "Multi-tenant relay bridge by Knotie AI — connects your OpenClaw instance to a remote relay server, enabling whitelabel browser and voice clients to reach local AI agents via WebSocket",
 
   register(api) {
-    const config = api.getConfig();
+    const config = api.pluginConfig || {};
 
     // Validate required bridge config
     if (!config.bridge?.url || !config.bridge?.token) {
