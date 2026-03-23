@@ -14,8 +14,6 @@
  * Learn more: https://knotie.ai
  */
 
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { Type } from "@sinclair/typebox";
 import { BridgeClient } from './bridge-client.js';
 import { GatewayClient } from './gateway-client.js';
 
@@ -24,7 +22,7 @@ let bridge = null;
 /** @type {GatewayClient|null} */
 let gateway = null;
 
-export default definePluginEntry({
+export default {
   id: "@knotie/openclaw-relay-plugin",
   name: "Knotie Relay Bridge",
   description: "Multi-tenant relay bridge by Knotie AI — connects your OpenClaw instance to a remote relay server, enabling whitelabel browser and voice clients to reach local AI agents via WebSocket",
@@ -88,7 +86,7 @@ export default definePluginEntry({
     api.registerTool({
       name: 'knotie_relay_status',
       description: 'Check the Knotie relay bridge connection status, including whether the bridge is connected to the relay server and which tenant it is registered as.',
-      parameters: Type.Object({}),
+      parameters: { type: 'object', properties: {} },
       async execute() {
         if (!bridge) {
           return {
@@ -114,7 +112,7 @@ export default definePluginEntry({
     api.registerTool({
       name: 'knotie_relay_reconnect',
       description: 'Force the Knotie relay bridge to disconnect and reconnect to the relay server.',
-      parameters: Type.Object({}),
+      parameters: { type: 'object', properties: {} },
       async execute() {
         if (!bridge) {
           return {
@@ -168,4 +166,4 @@ export default definePluginEntry({
       },
     });
   },
-});
+};
