@@ -1,5 +1,5 @@
 {
-  "id": "@knotie/openclaw-relay-plugin",
+  "id": "knotie-relay-bridge",
   "name": "Knotie Relay Bridge",
   "version": "1.0.0",
   "description": "Multi-tenant relay bridge by Knotie AI — connects your OpenClaw instance to a remote relay server, enabling whitelabel browser and voice clients to reach local AI agents via WebSocket",

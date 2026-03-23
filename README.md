@@ -59,7 +59,7 @@ The plugin runs inside OpenClaw as a native plugin. It:
 
 ```bash
 # From npm
-openclaw plugins install @knotie/openclaw-relay-plugin
+openclaw plugins install knotie-relay-bridge
 
 # Or from a local directory (development)
 openclaw plugins install ./openclaw-relay-plugin
@@ -94,9 +94,9 @@ If you prefer, add to `~/.openclaw/settings.json` manually:
 ```json
 {
   "plugins": {
-    "allow": ["@knotie/openclaw-relay-plugin"],
+    "allow": ["knotie-relay-bridge"],
     "entries": {
-      "@knotie/openclaw-relay-plugin": {
+      "knotie-relay-bridge": {
         "enabled": true,
         "config": {
           "bridge": {
@@ -126,7 +126,7 @@ The plugin starts automatically — no separate process needed. You'll see:
 
 ## Configuration Reference
 
-All config goes under `plugins.entries.@knotie/openclaw-relay-plugin.config` in your OpenClaw settings:
+All config goes under `plugins.entries.knotie-relay-bridge.config` in your OpenClaw settings:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -260,7 +260,7 @@ npm login
 
 # 2. If this is a scoped package under @knotie, ensure the org exists
 #    and set access to public (scoped packages are private by default)
-npm access public @knotie/openclaw-relay-plugin
+npm access public knotie-relay-bridge
 
 # 3. Verify package contents before publishing
 npm pack --dry-run
@@ -270,7 +270,7 @@ npm pack --dry-run
 npm publish --access public
 
 # 5. Verify it's live
-npm info @knotie/openclaw-relay-plugin
+npm info knotie-relay-bridge
 ```
 
 ### Add an .npmignore (recommended)
@@ -326,7 +326,7 @@ openclaw plugins search knotie-relay
 Users can install directly:
 
 ```bash
-openclaw plugins install @knotie/openclaw-relay-plugin
+openclaw plugins install knotie-relay-bridge
 ```
 
 OpenClaw checks ClawHub first, then falls back to npm — so publishing to both gives maximum reach.
@@ -369,7 +369,7 @@ npm run dev
 
 **Plugin not loading:**
 - Run `openclaw plugins list` to verify installation
-- Check that `@knotie/openclaw-relay-plugin` is in the `plugins.allow` array
+- Check that `knotie-relay-bridge` is in the `plugins.allow` array
 - Ensure `enabled: true` in the plugin entry config
 
 **Bridge not connecting:**

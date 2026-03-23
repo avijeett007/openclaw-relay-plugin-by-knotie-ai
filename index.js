@@ -6,7 +6,7 @@
  * AI agents via WebSocket.
  *
  * Install:
- *   openclaw plugins install @knotie/openclaw-relay-plugin
+ *   openclaw plugins install knotie-relay-bridge
  *
  * Data flow:
  *   Browser / Voice Client  <── WS /chat ──>  Knotie Relay Server  <── WS /bot ──>  This Plugin  <── ACP WS ──>  Local OpenClaw Gateway
@@ -23,7 +23,7 @@ let bridge = null;
 let gateway = null;
 
 export default {
-  id: "@knotie/openclaw-relay-plugin",
+  id: "knotie-relay-bridge",
   name: "Knotie Relay Bridge",
   description: "Multi-tenant relay bridge by Knotie AI — connects your OpenClaw instance to a remote relay server, enabling whitelabel browser and voice clients to reach local AI agents via WebSocket",
 

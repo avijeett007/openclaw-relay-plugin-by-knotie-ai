@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 
-const PLUGIN_ID = '@knotie/openclaw-relay-plugin';
+const PLUGIN_ID = 'knotie-relay-bridge';
 
 // ─── Argument parsing ────────────────────────────────────────────────────────
 

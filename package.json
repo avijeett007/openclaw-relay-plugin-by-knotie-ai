@@ -1,5 +1,5 @@
 {
-  "name": "@knotie/openclaw-relay-plugin",
+  "name": "knotie-relay-bridge",
   "version": "1.0.0",
   "type": "module",
   "description": "Knotie Relay Bridge for OpenClaw — multi-tenant relay plugin that lets agencies serve AI agents to business clients via whitelabel chat, voice, and OpenClaw interfaces",
