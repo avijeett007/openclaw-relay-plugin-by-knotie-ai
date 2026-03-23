@@ -5,8 +5,7 @@
   "description": "Knotie Relay Bridge for OpenClaw — multi-tenant relay plugin that lets agencies serve AI agents to business clients via whitelabel chat, voice, and OpenClaw interfaces",
   "main": "index.js",
   "openclaw": {
-    "entrypoint": "index.js",
-    "manifest": "openclaw.plugin.json"
+    "extensions": ["./index.js"]
   },
   "scripts": {
     "start": "node index.js",

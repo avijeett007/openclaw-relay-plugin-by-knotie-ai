@@ -318,8 +318,9 @@ Before publishing to npm or ClawHub, verify:
 - [ ] `package.json` has correct `name`, `version`, `description`, `author`, `license`
 - [ ] `package.json` has `"type": "module"` and the `openclaw` metadata block
 - [ ] `openclaw.plugin.json` exists with valid `id`, `name`, `configSchema`
-- [ ] Entry point (`index.js`) exports `definePluginEntry` as default
+- [ ] Entry point (`index.js`) uses `definePluginEntry({...})` from `openclaw/plugin-sdk/plugin-entry`
 - [ ] All imports use ESM (`import`/`export`, not `require`)
+- [ ] `openclaw.extensions` in package.json points to your entry file (e.g. `["./index.js"]`)
 - [ ] `npm pack --dry-run` shows only intended files (no secrets)
 - [ ] Plugin loads without errors: test with `openclaw plugins install ./openclaw-relay-plugin`
 - [ ] `ws` dependency is listed in `dependencies` (not `devDependencies`)
