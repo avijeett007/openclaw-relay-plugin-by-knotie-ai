@@ -65,9 +65,31 @@ openclaw plugins install @knotie/openclaw-relay-plugin
 openclaw plugins install ./openclaw-relay-plugin
 ```
 
-### 2. Configure in your OpenClaw settings
+### 2. Configure (automatic — recommended)
 
-Add to `~/.openclaw/settings.json`:
+Run the setup script to safely merge config into your OpenClaw settings:
+
+```bash
+# Interactive — prompts for relay URL and bot token
+node setup.js
+
+# Or pass values directly (no prompts)
+node setup.js --url wss://relay.yourdomain.com/bot --token sk-relay-bot-YOUR_TOKEN_HERE
+
+# Optionally override gateway defaults
+node setup.js --url wss://relay.yourdomain.com/bot --token sk-relay-bot-xxx \
+  --gateway-url ws://127.0.0.1:18789 --agent-id main
+```
+
+The setup script will:
+- Read your existing `~/.openclaw/settings.json` (or create it)
+- Add the plugin to `plugins.allow` if not already there
+- Merge the relay config into `plugins.entries` without overwriting your other settings
+- Preserve any existing customizations you've made
+
+### 2b. Configure (manual — alternative)
+
+If you prefer, add to `~/.openclaw/settings.json` manually:
 
 ```json
 {

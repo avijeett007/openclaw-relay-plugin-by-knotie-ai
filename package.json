@@ -15,9 +15,13 @@
     "openclaw": ">=2026.3.13"
   },
   "scripts": {
+    "setup": "node setup.js",
     "start": "node index.js",
     "dev": "node --watch index.js",
     "prepublishOnly": "node -e \"import('./index.js')\" --input-type=module"
+  },
+  "bin": {
+    "knotie-relay-setup": "./setup.js"
   },
   "dependencies": {
     "ws": "^8.17.0"
