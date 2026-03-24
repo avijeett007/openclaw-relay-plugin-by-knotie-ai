@@ -55,6 +55,7 @@ export default {
           url: gatewayConfig.url || 'ws://127.0.0.1:18789',
           agentId: gatewayConfig.agentId || 'main',
           token: gatewayConfig.token || '',
+          skipDeviceAuth: gatewayConfig.skipDeviceAuth || false,
           verbose: logConfig.verbose || false,
         });
 

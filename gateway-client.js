@@ -28,6 +28,7 @@ export class GatewayClient {
    * @param {string}  opts.url        - OpenClaw gateway WS URL
    * @param {string}  opts.agentId    - Agent ID to target in gateway (e.g. "main")
    * @param {string}  [opts.token]    - Gateway auth token (OPENCLAW_GATEWAY_TOKEN)
+   * @param {boolean} [opts.skipDeviceAuth] - Skip device auth (for dangerouslyDisableDeviceAuth gateways)
    * @param {boolean} opts.verbose
    */
   constructor(opts) {
@@ -35,6 +36,7 @@ export class GatewayClient {
     this.agentId = opts.agentId || 'main';
     this.token   = opts.token   || process.env.OPENCLAW_GATEWAY_TOKEN || '';
     this.verbose = opts.verbose || false;
+    this.skipDeviceAuth = opts.skipDeviceAuth || false;
 
     /** @type {WebSocket|null} */
     this.ws = null;
@@ -52,18 +54,19 @@ export class GatewayClient {
     this._connectPromise = null;
     this._reqId = 1;
 
-    // Generate a stable Ed25519 device keypair (persisted in memory for session lifetime)
-    this._deviceKeyPair = crypto.generateKeyPairSync('ed25519');
-    const spkiDer = this._deviceKeyPair.publicKey.export({ type: 'spki', format: 'der' });
-    // The raw 32-byte Ed25519 public key is the last 32 bytes of the SPKI DER encoding
-    const rawPublicKey = spkiDer.subarray(spkiDer.length - 32);
-    // publicKey sent to gateway as base64 of the raw 32-byte key
-    this._devicePublicKeyB64 = rawPublicKey.toString('base64');
-    // Device ID = SHA-256 hex of the raw public key bytes
-    this._deviceId = crypto.createHash('sha256')
-      .update(rawPublicKey)
-      .digest('hex');
-    // Keep raw key for reference
+    // Generate Ed25519 device keypair unless device auth is skipped
+    this._deviceKeyPair = this.skipDeviceAuth ? null : crypto.generateKeyPairSync('ed25519');
+    if (this._deviceKeyPair) {
+      const spkiDer = this._deviceKeyPair.publicKey.export({ type: 'spki', format: 'der' });
+      const rawPublicKey = spkiDer.subarray(spkiDer.length - 32);
+      this._devicePublicKeyB64 = rawPublicKey.toString('base64');
+      this._deviceId = crypto.createHash('sha256')
+        .update(rawPublicKey)
+        .digest('hex');
+    } else {
+      this._devicePublicKeyB64 = null;
+      this._deviceId = null;
+    }
     this._rawPublicKey = rawPublicKey;
   }
 
@@ -221,54 +224,62 @@ export class GatewayClient {
 
     this.verbose && console.log(`[Gateway] Received challenge nonce=${nonce}`);
 
-    // Sign the v2 payload: deterministic JSON with sorted keys matching
-    // the fields the gateway reconstructs from the connect request.
-    // v2 payload binds: deviceId, publicKey, clientId, role, scopes, token, nonce, signedAt
     const signedAt = Date.now();
-    const signPayload = JSON.stringify({
-      version: 'v2',
-      deviceId: this._deviceId,
-      publicKey: this._devicePublicKeyB64,
-      clientId: 'cli',
+
+    // Build connect params
+    const params = {
+      minProtocol: 3,
+      maxProtocol: 3,
+      client: {
+        id: 'cli',
+        version: '1.0.0',
+        platform: 'linux',
+        mode: 'cli',
+      },
       role: 'operator',
       scopes: ['operator.read', 'operator.write'],
-      token: this.token,
-      nonce,
-      signedAt,
-    });
+      caps: [],
+      commands: [],
+      permissions: {},
+      auth: { token: this.token },
+      locale: 'en-US',
+      userAgent: 'cli/1.0.0',
+    };
 
-    const signature = crypto.sign(null, Buffer.from(signPayload), this._deviceKeyPair.privateKey)
-      .toString('base64');
+    // Include device identity with Ed25519 signature if we have a keypair.
+    // If gateway has dangerouslyDisableDeviceAuth=true, the device field
+    // can be omitted for localhost connections.
+    if (this._deviceKeyPair) {
+      // Sign the v2 payload
+      const signPayload = JSON.stringify({
+        version: 'v2',
+        deviceId: this._deviceId,
+        publicKey: this._devicePublicKeyB64,
+        clientId: 'cli',
+        role: 'operator',
+        scopes: ['operator.read', 'operator.write'],
+        token: this.token,
+        nonce,
+        signedAt,
+      });
+
+      const signature = crypto.sign(null, Buffer.from(signPayload), this._deviceKeyPair.privateKey)
+        .toString('base64');
+
+      params.device = {
+        id: this._deviceId,
+        publicKey: this._devicePublicKeyB64,
+        signature,
+        signedAt,
+        nonce,
+      };
+    }
 
     const connectReq = {
       type: 'req',
       id: 'connect-1',
       method: 'connect',
-      params: {
-        minProtocol: 3,
-        maxProtocol: 3,
-        client: {
-          id: 'cli',
-          version: '1.0.0',
-          platform: 'linux',
-          mode: 'cli',
-        },
-        role: 'operator',
-        scopes: ['operator.read', 'operator.write'],
-        caps: [],
-        commands: [],
-        permissions: {},
-        auth: { token: this.token },
-        locale: 'en-US',
-        userAgent: 'cli/1.0.0',
-        device: {
-          id: this._deviceId,
-          publicKey: this._devicePublicKeyB64,
-          signature,
-          signedAt,
-          nonce,
-        },
-      },
+      params,
     };
 
     this.verbose && console.log('[Gateway] → connect request');
