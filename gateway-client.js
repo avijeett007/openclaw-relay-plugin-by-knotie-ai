@@ -54,13 +54,15 @@ export class GatewayClient {
 
     // Generate a stable Ed25519 device keypair (persisted in memory for session lifetime)
     this._deviceKeyPair = crypto.generateKeyPairSync('ed25519');
-    this._devicePublicKeyB64 = this._deviceKeyPair.publicKey
-      .export({ type: 'spki', format: 'der' }).toString('base64');
-    // Device ID = sha256 fingerprint of the public key
+    const spkiDer = this._deviceKeyPair.publicKey.export({ type: 'spki', format: 'der' });
+    // The raw 32-byte Ed25519 public key is the last 32 bytes of the SPKI DER encoding
+    const rawPublicKey = spkiDer.subarray(spkiDer.length - 32);
+    // Send the raw public key as base64 (not the SPKI wrapper)
+    this._devicePublicKeyB64 = rawPublicKey.toString('base64');
+    // Device ID = SHA-256 fingerprint of the raw public key bytes
     this._deviceId = crypto.createHash('sha256')
-      .update(this._deviceKeyPair.publicKey.export({ type: 'spki', format: 'der' }))
-      .digest('hex')
-      .slice(0, 32);
+      .update(rawPublicKey)
+      .digest('hex');
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
