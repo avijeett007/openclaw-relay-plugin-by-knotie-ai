@@ -54,6 +54,7 @@ export default {
         gateway = new GatewayClient({
           url: gatewayConfig.url || 'ws://127.0.0.1:18789',
           agentId: gatewayConfig.agentId || 'main',
+          token: gatewayConfig.token || '',
           verbose: logConfig.verbose || false,
         });
 

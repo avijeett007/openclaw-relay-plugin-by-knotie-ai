@@ -51,6 +51,10 @@
             "type": "string",
             "default": "main",
             "description": "Agent ID to target in the gateway"
+          },
+          "token": {
+            "type": "string",
+            "description": "Gateway auth token (OPENCLAW_GATEWAY_TOKEN). Falls back to env var if not set."
           }
         }
       },

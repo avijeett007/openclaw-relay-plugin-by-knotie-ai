@@ -1,82 +1,84 @@
 /**
  * GatewayClient
  *
- * Manages a WebSocket connection to the local OpenClaw gateway (default: ws://127.0.0.1:18789).
+ * Connects to the local OpenClaw gateway (default: ws://127.0.0.1:18789)
+ * using the Gateway WebSocket Protocol (NOT JSON-RPC).
  *
- * OpenClaw uses ACP (Agent Communication Protocol) — a JSON-RPC 2.0 style protocol
- * over WebSocket. Each relay sessionId maps to an OpenClaw session key so multiple
- * browser sessions can coexist on the same gateway.
+ * Protocol flow:
+ *   1. Open WebSocket
+ *   2. Receive connect.challenge {nonce, ts} from gateway
+ *   3. Send connect request with auth token + signed device identity
+ *   4. Receive hello-ok → connection ready
+ *   5. Send chat.send requests, receive chat events for streamed responses
  *
- * ACP message format (outbound to gateway):
- *   { jsonrpc: "2.0", method: "prompt", params: { sessionKey, agentId, role, content }, id }
- *
- * ACP message format (inbound from gateway):
- *   { jsonrpc: "2.0", result: { type, content, done }, id }           ← response
- *   { jsonrpc: "2.0", method: "stream_chunk", params: { sessionKey, content } } ← stream
- *
- * The client maintains a SINGLE persistent WebSocket to the gateway and multiplexes
- * all sessions over it.
+ * Frame format:
+ *   Request:  { type: "req", id, method, params }
+ *   Response: { type: "res", id, ok, payload | error }
+ *   Event:    { type: "event", event, payload }
  */
 
 import WebSocket from 'ws';
+import crypto from 'node:crypto';
 
-const GATEWAY_CONNECT_TIMEOUT = 10000;
+const GATEWAY_CONNECT_TIMEOUT = 15000;
 
 export class GatewayClient {
   /**
    * @param {object} opts
-   * @param {string}  opts.url      - OpenClaw gateway WS URL
-   * @param {string}  opts.agentId  - Agent ID to target in gateway (e.g. "main")
+   * @param {string}  opts.url        - OpenClaw gateway WS URL
+   * @param {string}  opts.agentId    - Agent ID to target in gateway (e.g. "main")
+   * @param {string}  [opts.token]    - Gateway auth token (OPENCLAW_GATEWAY_TOKEN)
    * @param {boolean} opts.verbose
    */
   constructor(opts) {
     this.url     = opts.url     || 'ws://127.0.0.1:18789';
     this.agentId = opts.agentId || 'main';
+    this.token   = opts.token   || process.env.OPENCLAW_GATEWAY_TOKEN || '';
     this.verbose = opts.verbose || false;
 
     /** @type {WebSocket|null} */
     this.ws = null;
+    this.connected = false;
 
-    /** pending JSON-RPC calls: requestId → { resolve, reject, timeoutHandle } */
+    /** pending requests: id → { resolve, reject, timeoutHandle } */
     this._pending = new Map();
 
-    /** active streaming sessions: sessionKey → { onChunk, onDone, onError } */
-    this._streaming = new Map();
+    /** active chat sessions: sessionKey → { onChunk, onDone, onError } */
+    this._chatSessions = new Map();
 
     /** relay sessionId → gateway sessionKey */
     this._sessionMap = new Map();
 
     this._connectPromise = null;
-    this._rpcId = 1;
+    this._reqId = 1;
+
+    // Generate a stable Ed25519 device keypair (persisted in memory for session lifetime)
+    this._deviceKeyPair = crypto.generateKeyPairSync('ed25519');
+    this._devicePublicKeyB64 = this._deviceKeyPair.publicKey
+      .export({ type: 'spki', format: 'der' }).toString('base64');
+    // Device ID = sha256 fingerprint of the public key
+    this._deviceId = crypto.createHash('sha256')
+      .update(this._deviceKeyPair.publicKey.export({ type: 'spki', format: 'der' }))
+      .digest('hex')
+      .slice(0, 32);
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
 
   /**
-   * Send a prompt to the gateway, streaming back responses via callbacks.
-   *
-   * @param {object}   opts
-   * @param {string}   opts.sessionId    - relay session ID (browser session)
-   * @param {string}   opts.content      - user message text
-   * @param {string}   opts.role         - 'user' | 'assistant' | 'system'
-   * @param {object}   opts.metadata     - extra metadata to pass through
-   * @param {Function} opts.onChunk      - called with each streaming chunk (string)
-   * @param {Function} opts.onDone       - called with final content (string) when done
-   * @param {Function} opts.onError      - called with error message (string)
-   * @param {number}   opts.timeoutMs    - max wait for response
+   * Send a prompt to the gateway via chat.send, streaming responses via callbacks.
    */
   async sendPrompt(opts) {
     const { sessionId, content, role, metadata, onChunk, onDone, onError, timeoutMs } = opts;
 
-    // Map relay session → gateway session key (persistent per session)
+    // Map relay session → gateway session key
     if (!this._sessionMap.has(sessionId)) {
-      this._sessionMap.set(sessionId, `acp:relay:${sessionId}`);
+      this._sessionMap.set(sessionId, `relay:${sessionId}`);
     }
     const sessionKey = this._sessionMap.get(sessionId);
 
     this.verbose && console.log(`[Gateway] sendPrompt session=${sessionKey}`);
 
-    // Ensure connected
     try {
       await this._ensureConnected();
     } catch (err) {
@@ -84,71 +86,39 @@ export class GatewayClient {
       return;
     }
 
-    // Register streaming handlers for this session
-    this._streaming.set(sessionKey, { onChunk, onDone, onError });
+    // Register chat session handlers for streaming events
+    this._chatSessions.set(sessionKey, { onChunk, onDone, onError });
 
-    // Build ACP JSON-RPC request
-    const id = this._rpcId++;
-    const request = {
-      jsonrpc: '2.0',
-      method: 'prompt',
-      params: {
+    // Send chat.send request
+    const text = role === 'system' ? `/system ${content}` : content;
+
+    try {
+      const result = await this._sendRequest('chat.send', {
         sessionKey,
-        agentId: this.agentId,
-        role: role || 'user',
-        content,
-        metadata: metadata || {},
-        stream: true,
-      },
-      id,
-    };
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this._pending.delete(id);
-        this._streaming.delete(sessionKey);
-        const msg = `Gateway prompt timeout after ${timeoutMs}ms`;
-        onError(msg);
-        reject(new Error(msg));
+        text,
+        idempotencyKey: crypto.randomUUID(),
       }, timeoutMs || 300000);
 
-      this._pending.set(id, {
-        resolve: (result) => {
-          clearTimeout(timeout);
-          resolve(result);
-        },
-        reject: (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        },
-        sessionKey,
-      });
-
-      this.ws.send(JSON.stringify(request));
-      this.verbose && console.log('[Gateway] → sent prompt RPC id=' + id);
-    });
+      this.verbose && console.log('[Gateway] chat.send ack:', JSON.stringify(result).slice(0, 200));
+      // chat.send is non-blocking — it acks immediately, response streams via chat events
+    } catch (err) {
+      this._chatSessions.delete(sessionKey);
+      onError(`Gateway chat.send failed: ${err.message}`);
+    }
   }
 
-  /** Close a specific relay session's gateway session. */
+  /** Close a specific relay session. */
   closeSession(relaySessionId) {
     const sessionKey = this._sessionMap.get(relaySessionId);
     if (sessionKey) {
-      this._streaming.delete(sessionKey);
+      this._chatSessions.delete(sessionKey);
       this._sessionMap.delete(relaySessionId);
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        const notification = {
-          jsonrpc: '2.0',
-          method: 'session_end',
-          params: { sessionKey, agentId: this.agentId },
-        };
-        this.ws.send(JSON.stringify(notification));
-      }
     }
   }
 
   /** Close all sessions and the gateway connection. */
   closeAll() {
-    this._streaming.clear();
+    this._chatSessions.clear();
     this._sessionMap.clear();
     for (const { reject } of this._pending.values()) {
       reject(new Error('Gateway client shutting down'));
@@ -158,12 +128,13 @@ export class GatewayClient {
       this.ws.close(1000, 'Shutdown');
       this.ws = null;
     }
+    this.connected = false;
   }
 
-  // ─── Internal ────────────────────────────────────────────────────────────────
+  // ─── Internal: Connection + Handshake ───────────────────────────────────────
 
   _ensureConnected() {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
       return Promise.resolve();
     }
 
@@ -180,28 +151,54 @@ export class GatewayClient {
       }, GATEWAY_CONNECT_TIMEOUT);
 
       ws.on('open', () => {
-        clearTimeout(timeout);
-        console.log('[Gateway] Connected');
-        this.ws = ws;
-        this._connectPromise = null;
-        resolve();
+        this.verbose && console.log('[Gateway] WebSocket open, waiting for connect.challenge...');
+        // Don't resolve yet — wait for handshake to complete
       });
 
-      ws.on('message', (raw) => this._onGatewayMessage(raw));
+      ws.on('message', (raw) => {
+        let msg;
+        try { msg = JSON.parse(raw); }
+        catch { return; }
+
+        this.verbose && console.log('[Gateway] ←', JSON.stringify(msg).slice(0, 300));
+
+        // Handle connect.challenge → send connect request
+        if (msg.type === 'event' && msg.event === 'connect.challenge') {
+          this._handleChallenge(ws, msg.payload, resolve, reject, timeout);
+          return;
+        }
+
+        // Handle hello-ok response
+        if (msg.type === 'res' && msg.id === 'connect-1') {
+          clearTimeout(timeout);
+          if (msg.ok && msg.payload?.type === 'hello-ok') {
+            console.log('[Gateway] Connected (protocol ' + msg.payload.protocol + ')');
+            this.ws = ws;
+            this.connected = true;
+            this._connectPromise = null;
+
+            // Re-attach the full message handler
+            ws.removeAllListeners('message');
+            ws.on('message', (raw2) => this._onMessage(raw2));
+            ws.on('close', (code, reason) => this._onClose(code, reason));
+            ws.on('error', (err) => console.error('[Gateway] WS error:', err.message));
+
+            resolve();
+          } else {
+            const errMsg = msg.error?.message || 'Gateway connect rejected';
+            console.error(`[Gateway] Connect failed: ${errMsg}`);
+            ws.close();
+            this._connectPromise = null;
+            reject(new Error(errMsg));
+          }
+          return;
+        }
+      });
 
       ws.on('close', (code, reason) => {
-        console.log(`[Gateway] Disconnected: code=${code} reason=${reason}`);
-        this.ws = null;
+        clearTimeout(timeout);
         this._connectPromise = null;
-        for (const { reject: rej, sessionKey } of this._pending.values()) {
-          rej(new Error('Gateway disconnected'));
-          if (sessionKey) {
-            const handlers = this._streaming.get(sessionKey);
-            handlers?.onError?.('Gateway disconnected unexpectedly');
-            this._streaming.delete(sessionKey);
-          }
-        }
-        this._pending.clear();
+        reject(new Error(`Gateway closed during handshake: code=${code} reason=${reason}`));
       });
 
       ws.on('error', (err) => {
@@ -215,76 +212,165 @@ export class GatewayClient {
     return this._connectPromise;
   }
 
-  _onGatewayMessage(raw) {
+  _handleChallenge(ws, challenge, resolve, reject, timeout) {
+    const { nonce, ts } = challenge;
+
+    this.verbose && console.log(`[Gateway] Received challenge nonce=${nonce}`);
+
+    // Sign the nonce with our device key (v2 signature payload)
+    const signedAt = Date.now();
+    const signPayload = JSON.stringify({
+      deviceId: this._deviceId,
+      clientId: 'knotie-relay-bridge',
+      role: 'operator',
+      scopes: ['operator.read', 'operator.write'],
+      token: this.token,
+      nonce,
+      signedAt,
+    });
+
+    const signature = crypto.sign(null, Buffer.from(signPayload), this._deviceKeyPair.privateKey)
+      .toString('base64');
+
+    const connectReq = {
+      type: 'req',
+      id: 'connect-1',
+      method: 'connect',
+      params: {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: {
+          id: 'knotie-relay-bridge',
+          version: '1.0.0',
+          platform: 'linux',
+          mode: 'operator',
+        },
+        role: 'operator',
+        scopes: ['operator.read', 'operator.write'],
+        caps: [],
+        commands: [],
+        permissions: {},
+        auth: { token: this.token },
+        locale: 'en-US',
+        userAgent: 'knotie-relay-bridge/1.0.0',
+        device: {
+          id: this._deviceId,
+          publicKey: this._devicePublicKeyB64,
+          signature,
+          signedAt,
+          nonce,
+        },
+      },
+    };
+
+    this.verbose && console.log('[Gateway] → connect request');
+    ws.send(JSON.stringify(connectReq));
+  }
+
+  // ─── Internal: Message Handling ─────────────────────────────────────────────
+
+  _onMessage(raw) {
     let msg;
     try { msg = JSON.parse(raw); }
-    catch { this.verbose && console.log('[Gateway] Non-JSON message, ignoring'); return; }
+    catch { return; }
 
     this.verbose && console.log('[Gateway] ←', JSON.stringify(msg).slice(0, 300));
 
-    // ── Streaming chunk (notification, no id) ────────────────────────────────
-    if (msg.method === 'stream_chunk' && msg.params) {
-      const { sessionKey, content } = msg.params;
-      const handlers = this._streaming.get(sessionKey);
-      if (handlers) {
-        handlers.onChunk(content);
-      }
-      return;
-    }
-
-    // ── JSON-RPC response (has id) ───────────────────────────────────────────
-    if (msg.id != null) {
+    // Response to a pending request
+    if (msg.type === 'res' && msg.id != null) {
       const pending = this._pending.get(msg.id);
-      if (!pending) return;
-
-      this._pending.delete(msg.id);
-      const handlers = this._streaming.get(pending.sessionKey);
-
-      if (msg.error) {
-        const errMsg = msg.error.message || 'Gateway RPC error';
-        handlers?.onError?.(errMsg);
-        pending.reject(new Error(errMsg));
-        this._streaming.delete(pending.sessionKey);
-        return;
+      if (pending) {
+        this._pending.delete(msg.id);
+        clearTimeout(pending.timeoutHandle);
+        if (msg.ok) {
+          pending.resolve(msg.payload);
+        } else {
+          pending.reject(new Error(msg.error?.message || 'Gateway request failed'));
+        }
       }
-
-      const result = msg.result || {};
-      if (result.content) {
-        handlers?.onDone?.(result.content);
-      } else if (result.done) {
-        handlers?.onDone?.('');
-      }
-
-      this._streaming.delete(pending.sessionKey);
-      pending.resolve(result);
       return;
     }
 
-    // ── Gateway notifications (method, no id) ────────────────────────────────
-    if (msg.method) {
-      switch (msg.method) {
-        case 'agent_message': {
-          const { sessionKey, content, done } = msg.params || {};
-          const handlers = this._streaming.get(sessionKey);
-          if (handlers) {
-            if (done) {
-              handlers.onDone(content || '');
-              this._streaming.delete(sessionKey);
-              for (const [rpcId, pending] of this._pending.entries()) {
-                if (pending.sessionKey === sessionKey) {
-                  this._pending.delete(rpcId);
-                  pending.resolve({ content, done });
-                }
-              }
-            } else {
-              handlers.onChunk(content || '');
-            }
-          }
-          break;
-        }
-        default:
-          this.verbose && console.log(`[Gateway] Unhandled notification method: ${msg.method}`);
-      }
+    // Chat events (streamed response chunks)
+    if (msg.type === 'event' && msg.event === 'chat') {
+      this._handleChatEvent(msg.payload);
+      return;
     }
+
+    // Tick keepalive — respond if needed
+    if (msg.type === 'event' && msg.event === 'tick') {
+      return; // no-op
+    }
+
+    this.verbose && console.log(`[Gateway] Unhandled: ${msg.type}/${msg.event || msg.method || msg.id}`);
+  }
+
+  _handleChatEvent(payload) {
+    if (!payload) return;
+
+    const sessionKey = payload.sessionKey;
+    const handlers = this._chatSessions.get(sessionKey);
+
+    if (!handlers) {
+      // Try matching by checking all sessions (fallback for 'main' session key mapping)
+      // The gateway may use a different sessionKey than what we sent
+      this.verbose && console.log(`[Gateway] Chat event for unknown session: ${sessionKey}`);
+      return;
+    }
+
+    // Chat events contain streamed text chunks and completion signals
+    if (payload.text || payload.content) {
+      handlers.onChunk(payload.text || payload.content || '');
+    }
+
+    if (payload.done || payload.status === 'completed' || payload.status === 'ok') {
+      const finalText = payload.finalText || payload.text || payload.content || '';
+      handlers.onDone(finalText);
+      this._chatSessions.delete(sessionKey);
+    }
+
+    if (payload.error) {
+      handlers.onError(payload.error?.message || payload.error || 'Chat error');
+      this._chatSessions.delete(sessionKey);
+    }
+  }
+
+  _onClose(code, reason) {
+    console.log(`[Gateway] Disconnected: code=${code} reason=${reason}`);
+    this.ws = null;
+    this.connected = false;
+    this._connectPromise = null;
+
+    // Fail all pending requests
+    for (const { reject, timeoutHandle } of this._pending.values()) {
+      clearTimeout(timeoutHandle);
+      reject(new Error('Gateway disconnected'));
+    }
+    this._pending.clear();
+
+    // Notify all active chat sessions
+    for (const [key, handlers] of this._chatSessions.entries()) {
+      handlers.onError('Gateway disconnected unexpectedly');
+      this._chatSessions.delete(key);
+    }
+  }
+
+  // ─── Internal: Request Helper ───────────────────────────────────────────────
+
+  _sendRequest(method, params, timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+      const id = `req-${this._reqId++}`;
+
+      const timeoutHandle = setTimeout(() => {
+        this._pending.delete(id);
+        reject(new Error(`Gateway ${method} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this._pending.set(id, { resolve, reject, timeoutHandle });
+
+      const frame = { type: 'req', id, method, params };
+      this.verbose && console.log(`[Gateway] → ${method} id=${id}`);
+      this.ws.send(JSON.stringify(frame));
+    });
   }
 }
