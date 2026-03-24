@@ -93,7 +93,17 @@ async function promptForConfig(args) {
 
 function resolveSettingsPath(custom) {
   if (custom) return custom;
-  return join(homedir(), '.openclaw', 'settings.json');
+
+  // OpenClaw uses either openclaw.json or settings.json depending on setup
+  const openclawJson = join(homedir(), '.openclaw', 'openclaw.json');
+  const settingsJson = join(homedir(), '.openclaw', 'settings.json');
+
+  // Prefer openclaw.json if it exists (gateway installs use this)
+  if (existsSync(openclawJson)) return openclawJson;
+  if (existsSync(settingsJson)) return settingsJson;
+
+  // Default to openclaw.json for new setups
+  return openclawJson;
 }
 
 function readSettings(path) {

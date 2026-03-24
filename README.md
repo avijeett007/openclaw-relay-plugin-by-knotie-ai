@@ -82,7 +82,7 @@ node setup.js --url wss://relay.yourdomain.com/bot --token sk-relay-bot-xxx \
 ```
 
 The setup script will:
-- Read your existing `~/.openclaw/settings.json` (or create it)
+- Auto-detect your config file (`~/.openclaw/openclaw.json` or `~/.openclaw/settings.json`)
 - Add the plugin to `plugins.allow` if not already there
 - Merge the relay config into `plugins.entries` without overwriting your other settings
 - Preserve any existing customizations you've made
