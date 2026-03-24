@@ -57,12 +57,14 @@ export class GatewayClient {
     const spkiDer = this._deviceKeyPair.publicKey.export({ type: 'spki', format: 'der' });
     // The raw 32-byte Ed25519 public key is the last 32 bytes of the SPKI DER encoding
     const rawPublicKey = spkiDer.subarray(spkiDer.length - 32);
-    // Send the raw public key as base64 (not the SPKI wrapper)
+    // publicKey sent to gateway as base64 of the raw 32-byte key
     this._devicePublicKeyB64 = rawPublicKey.toString('base64');
-    // Device ID = SHA-256 fingerprint of the raw public key bytes
+    // Device ID = SHA-256 hex of the raw public key bytes
     this._deviceId = crypto.createHash('sha256')
       .update(rawPublicKey)
       .digest('hex');
+    // Keep raw key for reference
+    this._rawPublicKey = rawPublicKey;
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
@@ -219,10 +221,14 @@ export class GatewayClient {
 
     this.verbose && console.log(`[Gateway] Received challenge nonce=${nonce}`);
 
-    // Sign the nonce with our device key (v2 signature payload)
+    // Sign the v2 payload: deterministic JSON with sorted keys matching
+    // the fields the gateway reconstructs from the connect request.
+    // v2 payload binds: deviceId, publicKey, clientId, role, scopes, token, nonce, signedAt
     const signedAt = Date.now();
     const signPayload = JSON.stringify({
+      version: 'v2',
       deviceId: this._deviceId,
+      publicKey: this._devicePublicKeyB64,
       clientId: 'cli',
       role: 'operator',
       scopes: ['operator.read', 'operator.write'],
