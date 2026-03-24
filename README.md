@@ -65,11 +65,15 @@ openclaw plugins install knotie-relay-bridge
 openclaw plugins install ./openclaw-relay-plugin
 ```
 
+> **Note:** During install you'll see `Missing required config: bridge.url and bridge.token` — this is normal. The plugin registers with empty config first, and you configure it in the next step.
+
 ### 2. Configure (automatic — recommended)
 
-Run the setup script to safely merge config into your OpenClaw settings:
+The install creates a plugin entry in your config with empty values. Run the setup script **after install** to populate the relay URL and bot token:
 
 ```bash
+cd ~/.openclaw/extensions/knotie-relay-bridge
+
 # Interactive — prompts for relay URL and bot token
 node setup.js
 
@@ -79,6 +83,9 @@ node setup.js --url wss://relay.yourdomain.com/bot --token sk-relay-bot-YOUR_TOK
 # Optionally override gateway defaults
 node setup.js --url wss://relay.yourdomain.com/bot --token sk-relay-bot-xxx \
   --gateway-url ws://127.0.0.1:18789 --agent-id main
+
+# If your config file is in a non-default location
+node setup.js --url wss://... --token sk-relay-bot-... --settings /root/.openclaw/openclaw.json
 ```
 
 The setup script will:
@@ -87,9 +94,17 @@ The setup script will:
 - Merge the relay config into `plugins.entries` without overwriting your other settings
 - Preserve any existing customizations you've made
 
+> **Important:** `openclaw plugins install` resets the plugin's config entry to defaults. If you reinstall or update the plugin, run `node setup.js` again to restore your relay URL and token.
+
+### 3. Restart the gateway
+
+```bash
+openclaw gateway restart
+```
+
 ### 2b. Configure (manual — alternative)
 
-If you prefer, add to `~/.openclaw/settings.json` manually:
+If you prefer, add to `~/.openclaw/openclaw.json` (or `settings.json`) manually:
 
 ```json
 {
