@@ -221,7 +221,7 @@ export class GatewayClient {
     const signedAt = Date.now();
     const signPayload = JSON.stringify({
       deviceId: this._deviceId,
-      clientId: 'knotie-relay-bridge',
+      clientId: 'cli',
       role: 'operator',
       scopes: ['operator.read', 'operator.write'],
       token: this.token,
@@ -240,7 +240,7 @@ export class GatewayClient {
         minProtocol: 3,
         maxProtocol: 3,
         client: {
-          id: 'knotie-relay-bridge',
+          id: 'cli',
           version: '1.0.0',
           platform: 'linux',
           mode: 'operator',
@@ -252,7 +252,7 @@ export class GatewayClient {
         permissions: {},
         auth: { token: this.token },
         locale: 'en-US',
-        userAgent: 'knotie-relay-bridge/1.0.0',
+        userAgent: 'cli/1.0.0',
         device: {
           id: this._deviceId,
           publicKey: this._devicePublicKeyB64,
