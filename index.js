@@ -29,10 +29,11 @@ export default {
 
   register(api) {
     const config = api.pluginConfig || {};
+    const log = api.logger;
 
     // Validate required bridge config
     if (!config.bridge?.url || !config.bridge?.token) {
-      console.error('[Knotie Relay] Missing required config: bridge.url and bridge.token');
+      log.error('Missing required config: bridge.url and bridge.token. Run: node setup.js --url <relay-url> --token <bot-token>');
       return;
     }
 
@@ -40,129 +41,86 @@ export default {
     const gatewayConfig = config.gateway || {};
     const logConfig = config.log || {};
 
-    // ─── Startup Hook: initialize bridge + gateway on plugin load ──────────
+    // ─── Service: manages bridge lifecycle (start/stop) ──────────────────
 
-    api.registerHook('startup', async () => {
-      console.log('[Knotie Relay] Starting relay bridge...');
-      console.log(`[Knotie Relay] Relay   : ${bridgeConfig.url}`);
-      console.log(`[Knotie Relay] Gateway : ${gatewayConfig.url || 'ws://127.0.0.1:18789'} (agent: ${gatewayConfig.agentId || 'main'})`);
+    api.registerService({
+      id: 'knotie-relay-bridge',
 
-      gateway = new GatewayClient({
-        url: gatewayConfig.url || 'ws://127.0.0.1:18789',
-        agentId: gatewayConfig.agentId || 'main',
-        verbose: logConfig.verbose || false,
-      });
+      async start() {
+        log.info('Starting relay bridge...');
+        log.info(`Relay   : ${bridgeConfig.url}`);
+        log.info(`Gateway : ${gatewayConfig.url || 'ws://127.0.0.1:18789'} (agent: ${gatewayConfig.agentId || 'main'})`);
 
-      bridge = new BridgeClient({
-        url: bridgeConfig.url,
-        token: bridgeConfig.token,
-        promptTimeoutMs: bridgeConfig.promptTimeoutMs || 300000,
-        reconnectBaseMs: bridgeConfig.reconnectBaseMs || 1000,
-        reconnectMaxMs: bridgeConfig.reconnectMaxMs || 60000,
-        verbose: logConfig.verbose || false,
-        gateway,
-        onStatusChange: (status) => {
-          console.log(`[Knotie Relay] Bridge status: ${status}`);
-        },
-      });
+        gateway = new GatewayClient({
+          url: gatewayConfig.url || 'ws://127.0.0.1:18789',
+          agentId: gatewayConfig.agentId || 'main',
+          verbose: logConfig.verbose || false,
+        });
 
-      bridge.start();
-      console.log('[Knotie Relay] Relay bridge started');
+        bridge = new BridgeClient({
+          url: bridgeConfig.url,
+          token: bridgeConfig.token,
+          promptTimeoutMs: bridgeConfig.promptTimeoutMs || 300000,
+          reconnectBaseMs: bridgeConfig.reconnectBaseMs || 1000,
+          reconnectMaxMs: bridgeConfig.reconnectMaxMs || 60000,
+          verbose: logConfig.verbose || false,
+          gateway,
+          onStatusChange: (status) => {
+            log.info(`Bridge status: ${status}`);
+          },
+        });
+
+        bridge.start();
+        log.info('Relay bridge started');
+      },
+
+      async stop() {
+        log.info('Shutting down relay bridge...');
+        if (bridge) bridge.stop();
+        if (gateway) gateway.closeAll();
+        bridge = null;
+        gateway = null;
+        log.info('Relay bridge stopped');
+      },
     });
 
-    // ─── Shutdown Hook: clean up on plugin unload ──────────────────────────
+    // ─── Command: /relay_status ──────────────────────────────────────────
 
-    api.registerHook('shutdown', async () => {
-      console.log('[Knotie Relay] Shutting down relay bridge...');
-      if (bridge) bridge.stop();
-      if (gateway) gateway.closeAll();
-      bridge = null;
-      gateway = null;
-      console.log('[Knotie Relay] Relay bridge stopped');
-    });
-
-    // ─── Agent Tool: knotie_relay_status ─────────────────────────────────
-
-    api.registerTool({
-      name: 'knotie_relay_status',
-      description: 'Check the Knotie relay bridge connection status, including whether the bridge is connected to the relay server and which tenant it is registered as.',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
+    api.registerCommand({
+      name: 'relay_status',
+      description: 'Show the Knotie relay bridge connection status',
+      handler() {
         if (!bridge) {
-          return {
-            content: [{ type: 'text', text: 'Knotie relay bridge is not running.' }],
-          };
+          return { text: 'Knotie relay bridge is not running.' };
         }
 
         const status = bridge.getStatus();
         const lines = [
+          '**Knotie Relay Bridge Status**',
           `Connected: ${status.connected ? 'Yes' : 'No'}`,
           `Relay URL: ${status.relayUrl}`,
-          status.tenantId ? `Tenant: ${status.tenantName} (${status.tenantId})` : 'Tenant: Not registered yet',
+          status.tenantId
+            ? `Tenant: ${status.tenantName} (${status.tenantId})`
+            : 'Tenant: Not registered yet',
         ];
 
-        return {
-          content: [{ type: 'text', text: lines.join('\n') }],
-        };
+        return { text: lines.join('\n') };
       },
     });
 
-    // ─── Agent Tool: knotie_relay_reconnect ──────────────────────────────
+    // ─── Command: /relay_reconnect ───────────────────────────────────────
 
-    api.registerTool({
-      name: 'knotie_relay_reconnect',
-      description: 'Force the Knotie relay bridge to disconnect and reconnect to the relay server.',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
-        if (!bridge) {
-          return {
-            content: [{ type: 'text', text: 'Knotie relay bridge is not running.' }],
-          };
-        }
-
-        bridge.stop();
-        bridge.start();
-        return {
-          content: [{ type: 'text', text: 'Knotie relay bridge reconnecting...' }],
-        };
-      },
-    });
-
-    // ─── CLI Subcommand: openclaw knotie-relay-status ──────────────────────
-
-    api.registerCli({
-      command: 'knotie-relay-status',
-      description: 'Show the current Knotie relay bridge connection status',
-      handler() {
-        if (!bridge) {
-          console.log('Knotie relay bridge is not running.');
-          return;
-        }
-
-        const status = bridge.getStatus();
-        console.log('Knotie Relay Bridge Status:');
-        console.log(`  Connected : ${status.connected ? 'Yes' : 'No'}`);
-        console.log(`  Relay URL : ${status.relayUrl}`);
-        if (status.tenantId) {
-          console.log(`  Tenant    : ${status.tenantName} (${status.tenantId})`);
-        } else {
-          console.log('  Tenant    : Not registered yet');
-        }
-      },
-    });
-
-    api.registerCli({
-      command: 'knotie-relay-reconnect',
+    api.registerCommand({
+      name: 'relay_reconnect',
       description: 'Force the Knotie relay bridge to reconnect',
       handler() {
         if (!bridge) {
-          console.log('Knotie relay bridge is not running.');
-          return;
+          return { text: 'Knotie relay bridge is not running.' };
         }
 
         bridge.stop();
         bridge.start();
-        console.log('Knotie relay bridge reconnecting...');
+        return { text: 'Knotie relay bridge reconnecting...' };
       },
     });
   },
